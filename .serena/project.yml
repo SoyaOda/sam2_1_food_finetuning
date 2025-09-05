@@ -1,0 +1,20 @@
+# プロジェクトの言語を指定
+language: python
+
+# gitignoreファイルを使用してファイルを無視するか
+ignore_all_files_in_gitignore: true
+
+# 追加で無視するパス（gitignore構文）
+ignored_paths: []
+
+# 読み取り専用モード（編集ツールを無効化）
+read_only: false
+
+# 除外するツール（通常は空のままで良い）
+excluded_tools: []
+
+# プロジェクト初期プロンプト
+initial_prompt: ""
+
+# プロジェクト名
+project_name: "sam2_1_food_finetuning"

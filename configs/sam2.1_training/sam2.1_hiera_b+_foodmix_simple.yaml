@@ -1,0 +1,42 @@
+# @package _global_
+# SAM2.1 Fine-tuning for Food Dataset - Simplified Configuration
+# Based on sam2.1_hiera_b+_MOSE_finetune.yaml structure
+
+defaults:
+  - default
+
+# Experiment logging
+experiment_log_dir: ./sam2_logs/foodmix_finetune
+
+# Model configuration - using Hiera B+ backbone
+model:
+  checkpoint: ${hydra:runtime.cwd}/external/sam2/checkpoints/sam2.1_hiera_base_plus.pt
+
+# Dataset paths - SA1BRawDataset expects images and annotations
+dataset:
+  img_folder: ${hydra:runtime.cwd}/data/foodmix_sa1b/images
+  gt_folder: ${hydra:runtime.cwd}/data/foodmix_sa1b/annotations
+  file_list_txt: ${hydra:runtime.cwd}/data/foodmix_sa1b/train.txt
+  multiplier: 1  # No artificial dataset size increase
+
+# Validation dataset
+val_dataset:
+  img_folder: ${hydra:runtime.cwd}/data/foodmix_sa1b/images
+  gt_folder: ${hydra:runtime.cwd}/data/foodmix_sa1b/annotations
+  file_list_txt: ${hydra:runtime.cwd}/data/foodmix_sa1b/val.txt
+
+# Training hyperparameters
+scratch:
+  train_batch_size: 1  # Adjust based on GPU memory
+  num_epochs: 40       # Total training epochs
+
+# Optimizer settings with differential learning rates
+optimizer:
+  base_lr: 5.0e-5     # Higher LR for mask decoder
+  vision_lr: 3.0e-6   # Lower LR for pre-trained vision encoder
+  weight_decay: 0.05
+  
+# Image transformations for training (referenced from default.yaml)
+vos:
+  num_frames: 1  # Single frame for static images
+  max_num_objects: 50  # Maximum objects per image

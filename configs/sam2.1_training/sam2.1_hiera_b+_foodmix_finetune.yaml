@@ -1,0 +1,45 @@
+# @package _global_
+# SAM2.1 Hiera B+ Food Dataset Fine-tuning Configuration
+# Based on MOSE fine-tuning example from SAM2 official repository
+
+# Default base configuration to inherit
+defaults:
+  - default
+
+# Experiment settings
+experiment_log_dir: ./sam2_logs/foodmix_finetune
+
+# Dataset configuration
+dataset:
+  img_folder: ${hydra:runtime.cwd}/data/foodmix_sa1b/images
+  gt_folder: ${hydra:runtime.cwd}/data/foodmix_sa1b/annotations
+  file_list_txt: ${hydra:runtime.cwd}/data/foodmix_sa1b/train.txt
+
+# Model configuration
+model:
+  checkpoint: ${hydra:runtime.cwd}/external/sam2/checkpoints/sam2.1_hiera_base_plus.pt
+
+# Training configuration
+scratch:
+  train_batch_size: 1
+  num_epochs: 40
+
+# Optimizer configuration
+optimizer:
+  base_lr: 5.0e-5  # Learning rate for mask decoder and other components
+  vision_lr: 3.0e-6  # Lower learning rate for Vision Encoder (Hiera)
+  weight_decay: 0.05
+
+# Validation dataset
+val_dataset:
+  img_folder: ${hydra:runtime.cwd}/data/foodmix_sa1b/images
+  gt_folder: ${hydra:runtime.cwd}/data/foodmix_sa1b/annotations
+  file_list_txt: ${hydra:runtime.cwd}/data/foodmix_sa1b/val.txt
+
+# Hydra configuration
+hydra:
+  run:
+    dir: ${experiment_log_dir}
+  sweep:
+    dir: ${experiment_log_dir}
+    subdir: ${hydra.job.num}
