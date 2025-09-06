@@ -63,8 +63,8 @@ def optimize_pytorch_settings():
     
     # CUDAメモリ最適化
     if torch.cuda.is_available():
-        # メモリフラグメンテーション削減
-        os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:512'
+        # メモリフラグメンテーション削減（より厳しく設定）
+        os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:256,garbage_collection_threshold:0.6'
         
         # CUDAキャッシュ最適化
         torch.backends.cuda.matmul.allow_tf32 = True
@@ -162,7 +162,7 @@ def main():
     parser.add_argument("--use-cluster", type=int, default=0)
     parser.add_argument("--num-gpus", type=int, default=1)
     parser.add_argument("--num-nodes", type=int, default=1)
-    parser.add_argument("--memory-check-interval", type=int, default=100, 
+    parser.add_argument("--memory-check-interval", type=int, default=50, 
                        help="Memory check interval in steps")
     parser.add_argument("--auto-restart-on-oom", action='store_true',
                        help="Automatically restart training on OOM")

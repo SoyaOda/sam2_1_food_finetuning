@@ -7,7 +7,7 @@
 # 設定
 CONFIG_NAME="sam2.1_training/sam2.1_hiera_b+_foodmix_optimized"
 MEMORY_THRESHOLD=90  # CPUメモリ使用率の閾値（％）
-GPU_MEMORY_THRESHOLD=95  # GPUメモリ使用率の閾値（％）
+GPU_MEMORY_THRESHOLD=80  # より厳しく設定  # GPUメモリ使用率の閾値（％）
 CHECK_INTERVAL=30  # 監視間隔（秒）
 LOG_FILE="training_monitor.log"
 
@@ -50,7 +50,7 @@ monitor_system() {
         local gpu_memory_usage=$(echo "$info" | cut -d',' -f3)
         
         # CPU使用率チェック
-        if (( $(echo "$cpu_usage > 95" | bc -l) )); then
+        if (( $(echo "$cpu_usage > 85" | bc -l) )); then
             log_warn "High CPU usage: ${cpu_usage}%"
         fi
         
@@ -151,7 +151,7 @@ main() {
                 echo "  --resume DIR           Resume from experiment directory"
                 echo "  --auto-resume          Automatically resume from latest experiment"
                 echo "  --memory-threshold N   CPU memory threshold % (default: 90)"
-                echo "  --gpu-memory-threshold N GPU memory threshold % (default: 95)"
+                echo "  --gpu-memory-threshold N GPU memory threshold % (default: 80)"
                 echo "  --check-interval N     Monitoring interval in seconds (default: 30)"
                 echo "  --help,-h             Show this help message"
                 exit 0
