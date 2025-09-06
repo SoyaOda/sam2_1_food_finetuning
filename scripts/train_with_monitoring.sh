@@ -227,7 +227,7 @@ main() {
             log_info "Using memory-optimized training script"
         fi
         
-        python "$training_script" -c "$config_name" --use-cluster 0 --num-gpus 1 &
+        /usr/bin/python3 "$training_script" -c "$config_name" --use-cluster 0 --num-gpus 1 &
         TRAINING_PID=$!
     fi
     

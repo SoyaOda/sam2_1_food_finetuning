@@ -1,284 +1,373 @@
 #!/usr/bin/env python3
 """
-12_merge_to_sa1b.py - FoodSeg103とUEC-FoodPixのデータを統合し、train/valスプリットを作成
+データセット統合・スプリット作成スクリプト
+UEC-FoodPix Complete + FoodSeg103 を統合してSAM2.1学習用のスプリットを作成
 
-両データセットの処理済みデータ（SA-1B形式）を統合し、
-学習用と検証用のファイルリストを生成する。
+学習スクリプト対応:
+bash scripts/train_with_monitoring.sh --memory-optimized --auto-resume
 """
 
-import os
 import json
 import random
-import glob
-import argparse
+import shutil
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Dict, Tuple
+import argparse
+from collections import defaultdict
+import numpy as np
 
-
-def check_annotation_integrity(data_dir: Path) -> Tuple[List[str], List[str]]:
-    """
-    画像とアノテーションの対応をチェックし、有効なペアのリストを返す
-    
-    Returns:
-        valid_pairs: 有効な画像ファイル名のリスト
-        missing_annotations: アノテーションが見つからない画像のリスト
-    """
+def verify_data_integrity(data_dir: Path) -> Dict[str, int]:
+    """データの整合性を確認"""
     img_dir = data_dir / "images"
     ann_dir = data_dir / "annotations"
     
-    if not img_dir.exists() or not ann_dir.exists():
-        print(f"警告: {data_dir} に必要なディレクトリが見つかりません")
-        return [], []
+    img_files = set(f.stem for f in img_dir.glob("*.jpg"))
+    ann_files = set(f.stem for f in ann_dir.glob("*.json"))
     
-    # 画像ファイルの一覧取得
-    img_files = sorted(
-        list(img_dir.glob("*.jpg")) + 
-        list(img_dir.glob("*.png")) +
-        list(img_dir.glob("*.jpeg"))
-    )
-    
-    valid_pairs = []
-    missing_annotations = []
-    
-    for img_path in img_files:
-        stem = img_path.stem
-        ann_path = ann_dir / f"{stem}.json"
-        
-        if ann_path.exists():
-            # JSONの妥当性チェック
-            try:
-                with open(ann_path, "r") as f:
-                    data = json.load(f)
-                    if "image" in data and "annotations" in data:
-                        valid_pairs.append(img_path.name)
-                    else:
-                        print(f"警告: {ann_path.name} のJSON形式が不正です")
-            except json.JSONDecodeError:
-                print(f"警告: {ann_path.name} のJSONパースに失敗しました")
-        else:
-            missing_annotations.append(img_path.name)
-    
-    return valid_pairs, missing_annotations
-
-
-def create_train_val_split(
-    valid_pairs: List[str], 
-    split_ratio: float = 0.9,
-    random_seed: int = 42
-) -> Tuple[List[str], List[str]]:
-    """
-    データをtrain/valに分割
-    
-    Args:
-        valid_pairs: 有効な画像ファイル名のリスト
-        split_ratio: 訓練データの割合（0.9 = 90%が訓練用）
-        random_seed: ランダムシード
-    
-    Returns:
-        train_list: 訓練用ファイルリスト
-        val_list: 検証用ファイルリスト
-    """
-    random.seed(random_seed)
-    
-    # シャッフル
-    shuffled = valid_pairs.copy()
-    random.shuffle(shuffled)
-    
-    # 分割
-    n_total = len(shuffled)
-    n_train = int(n_total * split_ratio)
-    
-    train_list = shuffled[:n_train]
-    val_list = shuffled[n_train:]
-    
-    return train_list, val_list
-
-
-def write_file_list(file_path: Path, file_list: List[str]):
-    """
-    ファイルリストをテキストファイルに書き込み
-    """
-    with open(file_path, "w") as f:
-        for fname in file_list:
-            f.write(f"{fname}\n")
-
-
-def merge_datasets(
-    data_dir: str,
-    split_ratio: float = 0.9,
-    random_seed: int = 42,
-    separate_datasets: bool = False
-):
-    """
-    FoodSeg103とUEC-FoodPixのデータを統合
-    
-    Args:
-        data_dir: foodmix_sa1bディレクトリのパス
-        split_ratio: 訓練データの割合
-        random_seed: ランダムシード
-        separate_datasets: データセット別に分割を作成するか
-    """
-    data_path = Path(data_dir)
-    
-    print("=== データセット統合処理を開始 ===")
-    print(f"データディレクトリ: {data_path}")
-    
-    # データ整合性チェック
-    valid_pairs, missing = check_annotation_integrity(data_path)
-    
-    if not valid_pairs:
-        print("エラー: 有効なデータペアが見つかりません")
-        print("前処理スクリプト（10_prepare_foodseg103.py, 11_prepare_uecfoodpix.py）を実行してください")
-        return
-    
-    print(f"\n有効なデータペア数: {len(valid_pairs)}")
-    if missing:
-        print(f"アノテーションが見つからない画像数: {len(missing)}")
-        if len(missing) <= 10:
-            for m in missing:
-                print(f"  - {m}")
-        else:
-            print(f"  （最初の10件）")
-            for m in missing[:10]:
-                print(f"  - {m}")
-    
-    # データセット別に分類（オプション）
-    if separate_datasets:
-        foodseg_pairs = [p for p in valid_pairs if not p.startswith("uec_")]
-        uec_pairs = [p for p in valid_pairs if p.startswith("uec_")]
-        
-        print(f"\nFoodSeg103: {len(foodseg_pairs)} ペア")
-        print(f"UEC-FoodPix: {len(uec_pairs)} ペア")
-        
-        # 各データセットで個別にスプリット
-        if foodseg_pairs:
-            fs_train, fs_val = create_train_val_split(foodseg_pairs, split_ratio, random_seed)
-            print(f"  FoodSeg103 - Train: {len(fs_train)}, Val: {len(fs_val)}")
-        else:
-            fs_train, fs_val = [], []
-        
-        if uec_pairs:
-            uec_train, uec_val = create_train_val_split(uec_pairs, split_ratio, random_seed + 1)
-            print(f"  UEC-FoodPix - Train: {len(uec_train)}, Val: {len(uec_val)}")
-        else:
-            uec_train, uec_val = [], []
-        
-        # 統合
-        train_list = fs_train + uec_train
-        val_list = fs_val + uec_val
-        
-        # 統合後にシャッフル
-        random.shuffle(train_list)
-        random.shuffle(val_list)
-    else:
-        # 全データを混合してスプリット
-        train_list, val_list = create_train_val_split(valid_pairs, split_ratio, random_seed)
-    
-    print(f"\n=== 最終スプリット ===")
-    print(f"Train: {len(train_list)} ファイル")
-    print(f"Val: {len(val_list)} ファイル")
-    print(f"合計: {len(train_list) + len(val_list)} ファイル")
-    
-    # ファイルリスト書き込み
-    train_file = data_path / "train.txt"
-    val_file = data_path / "val.txt"
-    
-    write_file_list(train_file, train_list)
-    write_file_list(val_file, val_list)
-    
-    print(f"\n=== ファイルリスト生成完了 ===")
-    print(f"Train list: {train_file}")
-    print(f"Val list: {val_file}")
-    
-    # サンプル表示
-    print(f"\nTrainデータのサンプル（最初の5件）:")
-    for i, fname in enumerate(train_list[:5]):
-        print(f"  {i+1}. {fname}")
-    
-    print(f"\nValデータのサンプル（最初の5件）:")
-    for i, fname in enumerate(val_list[:5]):
-        print(f"  {i+1}. {fname}")
-    
-    # 統計情報
-    print(f"\n=== データセット統計 ===")
+    # ペアの一致確認
+    matching_pairs = img_files & ann_files
     
     # データセット別の統計
-    foodseg_count = sum(1 for p in valid_pairs if not p.startswith("uec_"))
-    uec_count = sum(1 for p in valid_pairs if p.startswith("uec_"))
+    stats = {
+        "total_images": len(img_files),
+        "total_annotations": len(ann_files),
+        "matching_pairs": len(matching_pairs),
+        "uec_train": len([f for f in img_files if f.startswith("uec_train_")]),
+        "uec_test": len([f for f in img_files if f.startswith("uec_test_")]),
+        "foodseg_train": len([f for f in img_files if f.startswith("train_train_")]),
+        "foodseg_val": len([f for f in img_files if f.startswith("val_train_")])
+    }
     
-    if foodseg_count > 0:
-        print(f"FoodSeg103の割合: {foodseg_count}/{len(valid_pairs)} ({100*foodseg_count/len(valid_pairs):.1f}%)")
-    if uec_count > 0:
-        print(f"UEC-FoodPixの割合: {uec_count}/{len(valid_pairs)} ({100*uec_count/len(valid_pairs):.1f}%)")
-    
-    # アノテーション統計の簡易チェック
-    ann_dir = data_path / "annotations"
-    total_instances = 0
-    sample_count = min(100, len(valid_pairs))  # 最大100ファイルをサンプリング
-    
-    for fname in random.sample(valid_pairs, sample_count):
-        stem = Path(fname).stem
-        ann_path = ann_dir / f"{stem}.json"
-        try:
-            with open(ann_path, "r") as f:
-                data = json.load(f)
-                total_instances += len(data.get("annotations", []))
-        except:
-            pass
-    
-    if sample_count > 0:
-        avg_instances = total_instances / sample_count
-        print(f"\n平均インスタンス数（{sample_count}ファイルのサンプル）: {avg_instances:.1f}")
-        estimated_total = int(avg_instances * len(valid_pairs))
-        print(f"推定総インスタンス数: 約{estimated_total:,}")
+    return stats
 
+def load_annotation_metadata(ann_file: Path) -> Dict:
+    """アノテーションファイルからメタデータを読み込み"""
+    with open(ann_file, 'r') as f:
+        data = json.load(f)
+    
+    return {
+        "num_annotations": len(data.get("annotations", [])),
+        "image_width": data.get("image", {}).get("width", 0),
+        "image_height": data.get("image", {}).get("height", 0),
+        "total_area": sum(ann.get("area", 0) for ann in data.get("annotations", []))
+    }
+
+def create_balanced_splits(
+    all_files: List[str], 
+    train_ratio: float = 0.7, 
+    val_ratio: float = 0.15, 
+    test_ratio: float = 0.15,
+    seed: int = 42
+) -> Tuple[List[str], List[str], List[str]]:
+    """バランスの取れたデータセットスプリットを作成"""
+    
+    # データセット別にグループ化
+    uec_train = [f for f in all_files if f.startswith("uec_train_")]
+    uec_test = [f for f in all_files if f.startswith("uec_test_")]
+    foodseg_train = [f for f in all_files if f.startswith("train_train_")]
+    foodseg_val = [f for f in all_files if f.startswith("val_train_")]
+    
+    random.seed(seed)
+    
+    # 各グループをシャッフル
+    random.shuffle(uec_train)
+    random.shuffle(uec_test)
+    random.shuffle(foodseg_train)
+    random.shuffle(foodseg_val)
+    
+    # UECデータを分割（元々train/testに分かれているが、さらに細分化）
+    uec_train_count = int(len(uec_train) * train_ratio)
+    uec_val_count = int(len(uec_train) * val_ratio)
+    
+    uec_test_count = int(len(uec_test) * train_ratio)
+    uec_test_val_count = int(len(uec_test) * val_ratio)
+    
+    # FoodSeg103データを分割
+    fs_train_count = int(len(foodseg_train) * train_ratio)
+    fs_val_count = int(len(foodseg_train) * val_ratio)
+    
+    fs_val_train_count = int(len(foodseg_val) * 0.5)  # FoodSeg val の半分を train に
+    
+    # 最終的な分割
+    final_train = (
+        uec_train[:uec_train_count] +
+        uec_test[:uec_test_count] +
+        foodseg_train[:fs_train_count] +
+        foodseg_val[:fs_val_train_count]
+    )
+    
+    final_val = (
+        uec_train[uec_train_count:uec_train_count + uec_val_count] +
+        uec_test[uec_test_count:uec_test_count + uec_test_val_count] +
+        foodseg_train[fs_train_count:fs_train_count + fs_val_count] +
+        foodseg_val[fs_val_train_count:]
+    )
+    
+    final_test = (
+        uec_train[uec_train_count + uec_val_count:] +
+        uec_test[uec_test_count + uec_test_val_count:]
+    )
+    
+    # 残りをtestに追加（FoodSeg103のtrainの残り）
+    final_test.extend(foodseg_train[fs_train_count + fs_val_count:])
+    
+    return final_train, final_val, final_test
+
+def create_sam2_compatible_splits(
+    data_dir: Path,
+    output_dir: Path,
+    train_ratio: float = 0.7,
+    val_ratio: float = 0.15, 
+    test_ratio: float = 0.15,
+    copy_files: bool = False,
+    seed: int = 42
+):
+    """SAM2.1学習互換のスプリットを作成"""
+    
+    print("📊 データ整合性チェック中...")
+    stats = verify_data_integrity(data_dir)
+    
+    print(f"📈 データセット統計:")
+    for key, value in stats.items():
+        print(f"  {key}: {value:,}")
+    
+    if stats["matching_pairs"] != stats["total_images"]:
+        print("⚠️  警告: 画像とアノテーションのペア不一致があります")
+    
+    # 全ファイルリストを取得（マッチングペアのみ）
+    img_dir = data_dir / "images"
+    ann_dir = data_dir / "annotations"
+    
+    img_files = set(f.stem for f in img_dir.glob("*.jpg"))
+    ann_files = set(f.stem for f in ann_dir.glob("*.json"))
+    matching_files = list(img_files & ann_files)
+    
+    print(f"\n🔄 スプリット作成中 (train:{train_ratio}, val:{val_ratio}, test:{test_ratio})...")
+    train_files, val_files, test_files = create_balanced_splits(
+        matching_files, train_ratio, val_ratio, test_ratio, seed
+    )
+    
+    print(f"📋 スプリット結果:")
+    print(f"  Train: {len(train_files):,} ファイル")
+    print(f"  Val:   {len(val_files):,} ファイル")
+    print(f"  Test:  {len(test_files):,} ファイル")
+    print(f"  Total: {len(train_files) + len(val_files) + len(test_files):,} ファイル")
+    
+    # 出力ディレクトリ作成
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # SAM2.1学習用のファイルリスト作成
+    splits = {
+        "train": train_files,
+        "val": val_files,
+        "test": test_files
+    }
+    
+    for split_name, file_list in splits.items():
+        # .txtファイル（画像ファイル名）
+        txt_file = output_dir / f"{split_name}.txt"
+        with open(txt_file, 'w') as f:
+            for file_stem in sorted(file_list):
+                f.write(f"{file_stem}.jpg\n")
+        
+        print(f"📄 {split_name}.txt 作成: {len(file_list):,} エントリ")
+        
+        # オプション: ファイルをコピー
+        if copy_files:
+            split_img_dir = output_dir / f"{split_name}_images"
+            split_ann_dir = output_dir / f"{split_name}_annotations"
+            split_img_dir.mkdir(exist_ok=True)
+            split_ann_dir.mkdir(exist_ok=True)
+            
+            print(f"📂 {split_name} ファイルコピー中...")
+            for file_stem in file_list:
+                # 画像をコピー
+                src_img = img_dir / f"{file_stem}.jpg"
+                dst_img = split_img_dir / f"{file_stem}.jpg"
+                if src_img.exists():
+                    shutil.copy2(src_img, dst_img)
+                
+                # アノテーションをコピー
+                src_ann = ann_dir / f"{file_stem}.json"
+                dst_ann = split_ann_dir / f"{file_stem}.json"
+                if src_ann.exists():
+                    shutil.copy2(src_ann, dst_ann)
+    
+    # データセット情報をJSONで保存
+    dataset_info = {
+        "total_samples": len(matching_files),
+        "splits": {
+            "train": {"count": len(train_files), "ratio": len(train_files) / len(matching_files)},
+            "val": {"count": len(val_files), "ratio": len(val_files) / len(matching_files)},
+            "test": {"count": len(test_files), "ratio": len(test_files) / len(matching_files)}
+        },
+        "dataset_composition": {
+            "uec_train_samples": len([f for f in matching_files if f.startswith("uec_train_")]),
+            "uec_test_samples": len([f for f in matching_files if f.startswith("uec_test_")]),
+            "foodseg_train_samples": len([f for f in matching_files if f.startswith("train_train_")]),
+            "foodseg_val_samples": len([f for f in matching_files if f.startswith("val_train_")])
+        },
+        "paths": {
+            "source_images": str(img_dir),
+            "source_annotations": str(ann_dir),
+            "output_directory": str(output_dir)
+        },
+        "sam2_config": {
+            "img_folder": str(data_dir / "images"),
+            "gt_folder": str(data_dir / "annotations"),
+            "train_filelist": str(output_dir / "train.txt"),
+            "val_filelist": str(output_dir / "val.txt"),
+            "test_filelist": str(output_dir / "test.txt")
+        }
+    }
+    
+    info_file = output_dir / "dataset_info.json"
+    with open(info_file, 'w') as f:
+        json.dump(dataset_info, f, indent=2)
+    
+    print(f"ℹ️  データセット情報: {info_file}")
+    
+    return dataset_info
+
+def analyze_dataset_distribution(data_dir: Path, splits_dir: Path):
+    """データセット分布の詳細分析（簡易版）"""
+    print("\n📊 データセット分布分析中...")
+    
+    for split_name in ["train", "val", "test"]:
+        split_file = splits_dir / f"{split_name}.txt"
+        if not split_file.exists():
+            continue
+            
+        with open(split_file, 'r') as f:
+            files = [line.strip().replace('.jpg', '') for line in f if line.strip()]
+        
+        # データセット構成分析
+        uec_count = len([f for f in files if f.startswith("uec_")])
+        foodseg_count = len([f for f in files if f.startswith(("train_train_", "val_train_"))])
+        
+        print(f"  {split_name.upper()}: {len(files):,} ファイル")
+        print(f"    UEC-FoodPix: {uec_count:,} ファイル")
+        print(f"    FoodSeg103: {foodseg_count:,} ファイル")
 
 def main():
     parser = argparse.ArgumentParser(
-        description="FoodSeg103とUEC-FoodPixのデータを統合し、train/valスプリットを作成"
+        description="データセット統合・スプリット作成（SAM2.1学習用）",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+使用例:
+  # 基本的な統合とスプリット作成
+  python scripts/12_merge_to_sa1b.py --input data/foodmix_sa1b --output data/foodmix_sa1b_splits
+  
+  # カスタム比率でスプリット
+  python scripts/12_merge_to_sa1b.py --input data/foodmix_sa1b --output data/foodmix_sa1b_splits \\
+    --train-ratio 0.8 --val-ratio 0.1 --test-ratio 0.1
+    
+  # ファイルコピー付きで実行
+  python scripts/12_merge_to_sa1b.py --input data/foodmix_sa1b --output data/foodmix_sa1b_splits --copy-files
+
+学習実行:
+  bash scripts/train_with_monitoring.sh --memory-optimized --auto-resume
+        """
     )
+    
     parser.add_argument(
-        "--data-dir",
+        "--input",
         type=str,
         default="data/foodmix_sa1b",
-        help="SA-1B形式のデータが格納されているディレクトリ"
+        help="前処理済みデータのディレクトリ"
     )
+    
     parser.add_argument(
-        "--split-ratio",
-        type=float,
-        default=0.9,
-        help="訓練データの割合（デフォルト: 0.9）"
+        "--output",
+        type=str,
+        default="data/foodmix_sa1b_splits",
+        help="統合スプリットの出力ディレクトリ"
     )
+    
+    parser.add_argument(
+        "--train-ratio",
+        type=float,
+        default=0.7,
+        help="学習用データの比率 (default: 0.7)"
+    )
+    
+    parser.add_argument(
+        "--val-ratio",
+        type=float,
+        default=0.15,
+        help="検証用データの比率 (default: 0.15)"
+    )
+    
+    parser.add_argument(
+        "--test-ratio",
+        type=float,
+        default=0.15,
+        help="テスト用データの比率 (default: 0.15)"
+    )
+    
+    parser.add_argument(
+        "--copy-files",
+        action="store_true",
+        help="ファイルを実際にコピーする（容量注意）"
+    )
+    
     parser.add_argument(
         "--seed",
         type=int,
         default=42,
-        help="ランダムシード（デフォルト: 42）"
+        help="ランダムシード (default: 42)"
     )
+    
     parser.add_argument(
-        "--separate-datasets",
+        "--analyze-only",
         action="store_true",
-        help="データセット別に分割を作成してから統合"
+        help="分析のみ実行（ファイル作成なし）"
     )
     
     args = parser.parse_args()
     
-    # 処理実行
-    merge_datasets(
-        args.data_dir,
-        args.split_ratio,
-        args.seed,
-        args.separate_datasets
+    # 比率の合計チェック
+    total_ratio = args.train_ratio + args.val_ratio + args.test_ratio
+    if abs(total_ratio - 1.0) > 0.001:
+        print(f"❌ エラー: 比率の合計が1.0ではありません ({total_ratio})")
+        return
+    
+    data_dir = Path(args.input)
+    output_dir = Path(args.output)
+    
+    if not data_dir.exists():
+        print(f"❌ エラー: 入力ディレクトリが存在しません: {data_dir}")
+        return
+    
+    print("🚀 データセット統合・スプリット作成開始")
+    print(f"入力: {data_dir}")
+    print(f"出力: {output_dir}")
+    
+    if args.analyze_only:
+        verify_data_integrity(data_dir)
+        return
+    
+    # スプリット作成実行
+    dataset_info = create_sam2_compatible_splits(
+        data_dir=data_dir,
+        output_dir=output_dir,
+        train_ratio=args.train_ratio,
+        val_ratio=args.val_ratio,
+        test_ratio=args.test_ratio,
+        copy_files=args.copy_files,
+        seed=args.seed
     )
     
-    print("\n=== 処理完了 ===")
-    print("次のステップ:")
-    print("1. python scripts/13_optional_resize_1024.py - （任意）画像の1024x1024リサイズ")
-    print("2. python scripts/20_train_food_sam2.py - SAM2.1の学習開始")
-    print("\nまたは直接学習を開始:")
-    print("cd external/sam2")
-    print("python training/train.py -c configs/sam2.1_training/sam2.1_hiera_b+_foodmix_finetune.yaml")
-
+    # 分布分析
+    analyze_dataset_distribution(data_dir, output_dir)
+    
+    print(f"\\n✅ 統合・スプリット作成完了!")
+    print(f"\\n📋 SAM2.1学習での使用方法:")
+    print(f"   img_folder: {dataset_info['sam2_config']['img_folder']}")
+    print(f"   gt_folder: {dataset_info['sam2_config']['gt_folder']}")
+    print(f"   train_filelist: {dataset_info['sam2_config']['train_filelist']}")
+    print(f"\\n🎯 学習実行:")
+    print(f"   bash scripts/train_with_monitoring.sh --memory-optimized --auto-resume")
 
 if __name__ == "__main__":
     main()
