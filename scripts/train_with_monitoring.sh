@@ -6,6 +6,7 @@
 
 # 設定
 CONFIG_NAME="sam2.1_training/sam2.1_hiera_b+_foodmix_optimized"
+LARGE_CONFIG_NAME="sam2.1_training/sam2.1_hiera_l_foodmix_optimized"
 MEMORY_THRESHOLD=90  # CPUメモリ使用率の閾値（％）
 GPU_MEMORY_THRESHOLD=80  # より厳しく設定  # GPUメモリ使用率の閾値（％）
 CHECK_INTERVAL=30  # 監視間隔（秒）
@@ -40,6 +41,7 @@ get_system_info() {
 # システム監視
 monitor_system() {
     local training_pid=$1
+    local use_large_model=$2
     
     log_info "Starting system monitoring (PID: $training_pid)"
     
@@ -65,7 +67,14 @@ monitor_system() {
         
         # GPUメモリ使用率チェック
         if [[ -n "$gpu_memory_usage" ]] && (( $(echo "$gpu_memory_usage > $GPU_MEMORY_THRESHOLD" | bc -l) )); then
-            log_warn "High GPU memory usage: ${gpu_memory_usage}%"
+            if [[ "$use_large_model" == true ]]; then
+                log_warn "High GPU memory usage (Large model): ${gpu_memory_usage}%"
+                if (( $(echo "$gpu_memory_usage > 95" | bc -l) )); then
+                    log_error "Critical GPU memory usage for Large model: ${gpu_memory_usage}%. OOM likely to occur."
+                fi
+            else
+                log_warn "High GPU memory usage: ${gpu_memory_usage}%"
+            fi
         fi
         
         # 定期的な状況報告
@@ -109,6 +118,7 @@ main() {
     
     # 引数の解析
     local use_memory_optimized=false
+    local use_large_model=false
     local config_name="$CONFIG_NAME"
     local resume_dir=""
     local auto_resume=false
@@ -123,6 +133,11 @@ main() {
         case $1 in
             --memory-optimized)
                 use_memory_optimized=true
+                shift
+                ;;
+            --large-model)
+                use_large_model=true
+                config_name="$LARGE_CONFIG_NAME"
                 shift
                 ;;
             --config|-c)
@@ -177,6 +192,7 @@ main() {
                 echo "Usage: $0 [options]"
                 echo "Options:"
                 echo "  --memory-optimized     Use memory-optimized training script"
+                echo "  --large-model          Use SAM2.1 Hiera-Large model (auto-selects optimized config)"
                 echo "  --config,-c CONFIG     Training configuration name"
                 echo "  --resume DIR           Resume from experiment directory"
                 echo "  --auto-resume          Automatically resume from latest experiment"
@@ -207,10 +223,26 @@ main() {
     
     if command -v nvidia-smi &> /dev/null; then
         local gpu_info=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | head -1)
+        local gpu_memory=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1)
         log_info "  GPU: $gpu_info"
+        
+        # Largeモデル使用時のメモリチェック
+        if [[ "$use_large_model" == true ]]; then
+            if [[ $gpu_memory -lt 20000 ]]; then
+                log_warn "Largeモデルには20GB以上のGPUメモリを推奨します (現在: ${gpu_memory}MB)"
+                log_warn "メモリ不足が発生する可能性があります"
+            elif [[ $gpu_memory -ge 32000 ]]; then
+                log_info "充分なGPUメモリでLargeモデル学習を開始します"
+            else
+                log_info "Largeモデルでの学習を開始します (メモリ: ${gpu_memory}MB)"
+            fi
+        fi
     fi
     
-    log_info "Monitoring Configuration:"
+    log_info "Training Configuration:"
+    log_info "  Model: $(if [[ "$use_large_model" == true ]]; then echo "SAM2.1 Hiera-Large"; else echo "SAM2.1 Hiera-Base+"; fi)"
+    log_info "  Config: $config_name"
+    log_info "  Memory optimized: $use_memory_optimized"
     log_info "  Memory threshold: ${MEMORY_THRESHOLD}%"
     log_info "  GPU memory threshold: ${GPU_MEMORY_THRESHOLD}%"
     log_info "  Check interval: ${CHECK_INTERVAL}s"
@@ -315,7 +347,7 @@ main() {
     log_info "Training process started (PID: $TRAINING_PID)"
     
     # バックグラウンドで監視開始
-    monitor_system "$TRAINING_PID" &
+    monitor_system "$TRAINING_PID" "$use_large_model" &
     MONITOR_PID=$!
     
     # 学習プロセスの完了を待機

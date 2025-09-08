@@ -1,0 +1,54 @@
+# @package _global_
+# SAM2.1 Hiera-Large Fine-tuning for Food Dataset - Simplified Configuration
+# Based on sam2.1_hiera_b+_foodmix_simple.yaml with Large model optimizations
+
+defaults:
+  - default
+
+# Experiment logging - Large model specific directory
+experiment_log_dir: ./sam2_logs/foodmix_l_simple
+
+# Model configuration - using Hiera Large backbone
+model:
+  checkpoint: ${hydra:runtime.cwd}/external/sam2/checkpoints/sam2.1_hiera_large.pt
+  model_cfg: configs/sam2.1/sam2.1_hiera_l.yaml
+
+# Dataset paths - SA1BRawDataset expects images and annotations
+dataset:
+  img_folder: ${hydra:runtime.cwd}/data/foodmix_sa1b/images
+  gt_folder: ${hydra:runtime.cwd}/data/foodmix_sa1b/annotations
+  file_list_txt: ${hydra:runtime.cwd}/data/foodmix_sa1b/train.txt
+  multiplier: 1  # No artificial dataset size increase
+
+# Validation dataset
+val_dataset:
+  img_folder: ${hydra:runtime.cwd}/data/foodmix_sa1b/images
+  gt_folder: ${hydra:runtime.cwd}/data/foodmix_sa1b/annotations
+  file_list_txt: ${hydra:runtime.cwd}/data/foodmix_sa1b/val.txt
+
+# Training hyperparameters - Optimized for Large model
+scratch:
+  train_batch_size: 1  # Fixed to 1 for Large model memory requirements
+  num_epochs: 40       # Total training epochs
+  max_num_objects: 30  # Reduced from 50 for Large model memory optimization
+  num_train_workers: 2 # Reduced worker count for memory efficiency
+
+# Optimizer settings with differential learning rates - Large model optimized
+optimizer:
+  base_lr: 1.0e-4     # Standard learning rate within SAM2.1 recommended range
+  vision_lr: 3.0e-6   # Lower LR for pre-trained vision encoder
+  weight_decay: 0.05
+
+# Mixed precision training for Large model efficiency
+amp:
+  enabled: true
+  amp_dtype: bfloat16  # bf16 recommended for A100/H100, more stable than fp16
+
+# Memory optimization settings
+memory:
+  pin_memory: false  # Disable to prevent memory leaks
+  
+# Image transformations for training (referenced from default.yaml)
+vos:
+  num_frames: 1  # Single frame for static images
+  max_num_objects: 30  # Maximum objects per image (reduced for Large model)

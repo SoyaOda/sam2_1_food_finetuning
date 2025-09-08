@@ -1,0 +1,58 @@
+# @package _global_
+# SAM2.1 Hiera Large Food Dataset Fine-tuning Configuration
+# Based on MOSE fine-tuning example from SAM2 official repository
+
+# Default base configuration to inherit
+defaults:
+  - default
+
+# Experiment settings
+experiment_log_dir: ./sam2_logs/foodmix_l_finetune
+
+# Dataset configuration
+dataset:
+  img_folder: ${hydra:runtime.cwd}/data/foodmix_sa1b/images
+  gt_folder: ${hydra:runtime.cwd}/data/foodmix_sa1b/annotations
+  file_list_txt: ${hydra:runtime.cwd}/data/foodmix_sa1b/train.txt
+
+# Model configuration - CHANGED: Base+ -> Large
+model:
+  checkpoint: ${hydra:runtime.cwd}/external/sam2/checkpoints/sam2.1_hiera_large.pt
+  model_cfg: configs/sam2.1/sam2.1_hiera_l.yaml
+
+# Training configuration - ADJUSTED for Large model
+scratch:
+  train_batch_size: 1  # Reduced for Large model memory requirements
+  num_epochs: 40
+  max_num_objects: 30  # Reduced from default 50 for Large model memory optimization
+  num_train_workers: 2  # Reduced worker count for memory efficiency
+
+# Optimizer configuration
+optimizer:
+  base_lr: 1.0e-4  # Standard learning rate within SAM2.1 recommended range (1e-5 to 3e-4)
+  vision_lr: 3.0e-6  # Lower learning rate for Vision Encoder (Hiera)
+  weight_decay: 0.05
+
+# Mixed precision training for Large model efficiency
+amp:
+  enabled: true
+  amp_dtype: bfloat16  # bf16 recommended for A100/H100, more stable than fp16
+
+# Memory optimization settings
+memory:
+  pin_memory: false  # Disable to prevent memory leaks
+  gradient_accumulation_steps: 1  # Can be increased if batch_size needs to be reduced further
+
+# Validation dataset
+val_dataset:
+  img_folder: ${hydra:runtime.cwd}/data/foodmix_sa1b/images
+  gt_folder: ${hydra:runtime.cwd}/data/foodmix_sa1b/annotations
+  file_list_txt: ${hydra:runtime.cwd}/data/foodmix_sa1b/val.txt
+
+# Hydra configuration
+hydra:
+  run:
+    dir: ${experiment_log_dir}
+  sweep:
+    dir: ${experiment_log_dir}
+    subdir: ${hydra.job.num}
