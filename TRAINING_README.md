@@ -184,6 +184,23 @@ tensorboard --logdir=./sam2_logs/foodmix_optimized/tensorboard --port=6006
 # http://localhost:6006
 ```
 
+### 4. WandB監視
+
+```bash
+# WandB有効で学習実行（自動的にWandBダッシュボードにアップロード）
+bash scripts/train_with_monitoring.sh --memory-optimized --auto-resume --use-wandb
+
+# WandBダッシュボードアクセス
+# https://wandb.ai/{entity}/{project}/runs/{run-id}
+# 例: https://wandb.ai/username/sam2_food_segmentation/
+```
+
+**WandBで監視できる情報**:
+- システムメトリクス（CPU・GPU使用率、メモリ使用量）
+- Hydra設定パラメータ
+- 実験実行時間とハードウェア情報
+- 実験名: `sam2_food_{config_name}`
+
 ## 🔄 学習フロー
 
 ### 1. 学習開始からチェックポイントまで
@@ -347,6 +364,55 @@ grep "Memory" training_monitor.log | tail -20
 
 # GPU使用量推移  
 grep "GPU Memory" training_monitor.log | tail -20
+```
+
+## 🌐 WandB統合詳細
+
+### 1. WandB環境設定
+
+```bash
+# WandB依存関係（自動インストール済み）
+pip install wandb
+
+# APIキー設定（オプション - デフォルトキー内蔵）
+export WANDB_API_KEY=your_api_key_here
+
+# プロジェクト設定
+export WANDB_PROJECT=sam2_food_segmentation
+export WANDB_ENTITY=your_username_or_team
+```
+
+### 2. WandB使用例
+
+```bash
+# 基本的なWandB学習
+bash scripts/train_with_monitoring.sh --memory-optimized --auto-resume --use-wandb
+
+# カスタムプロジェクトでWandB学習  
+bash scripts/train_with_monitoring.sh \
+  --memory-optimized \
+  --auto-resume \
+  --use-wandb \
+  --wandb-project "food_segmentation_experiment_v2" \
+  --wandb-entity "research_team"
+```
+
+### 3. WandB記録内容
+
+- **設定情報**: 全てのHydra設定とコマンドライン引数
+- **システム情報**: ハードウェア仕様、GPU情報
+- **実行情報**: 実験名、開始時刻、実行時間
+- **リアルタイム監視**: TensorBoardと並行してメトリクス記録
+
+### 4. WandBトラブルシューティング
+
+```bash
+# WandBが利用できない場合の確認
+python -c "import wandb; print('WandB available')"
+
+# WandBなしで学習実行（フォールバック）
+bash scripts/train_with_monitoring.sh --memory-optimized --auto-resume
+# --use-wandbフラグを外すだけでTensorBoardのみ使用
 ```
 
 ## 📊 パフォーマンス最適化

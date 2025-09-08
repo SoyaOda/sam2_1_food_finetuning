@@ -112,6 +112,12 @@ main() {
     local config_name="$CONFIG_NAME"
     local resume_dir=""
     local auto_resume=false
+    local use_wandb=false
+    local wandb_project="sam2_food_segmentation"
+    local wandb_entity=""
+    local epochs=""
+    local learning_rate=""
+    local save_freq=""
     
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -143,6 +149,30 @@ main() {
                 CHECK_INTERVAL="$2"
                 shift 2
                 ;;
+            --use-wandb)
+                use_wandb=true
+                shift
+                ;;
+            --epochs)
+                epochs="$2"
+                shift 2
+                ;;
+            --lr|--learning-rate)
+                learning_rate="$2"
+                shift 2
+                ;;
+            --save-freq)
+                save_freq="$2"
+                shift 2
+                ;;
+            --wandb-project)
+                wandb_project="$2"
+                shift 2
+                ;;
+            --wandb-entity)
+                wandb_entity="$2"
+                shift 2
+                ;;
             --help|-h)
                 echo "Usage: $0 [options]"
                 echo "Options:"
@@ -153,6 +183,12 @@ main() {
                 echo "  --memory-threshold N   CPU memory threshold % (default: 90)"
                 echo "  --gpu-memory-threshold N GPU memory threshold % (default: 80)"
                 echo "  --check-interval N     Monitoring interval in seconds (default: 30)"
+                echo "  --use-wandb            Enable WandB logging"
+                echo "  --epochs N             Number of epochs to train"
+                echo "  --lr,--learning-rate N Learning rate"
+                echo "  --save-freq N          Checkpoint save frequency"
+                echo "  --wandb-project NAME   WandB project name (default: sam2_food_segmentation)"
+                echo "  --wandb-entity NAME    WandB entity (username/team)"
                 echo "  --help,-h             Show this help message"
                 exit 0
                 ;;
@@ -210,12 +246,32 @@ main() {
     if [[ -n "$resume_dir" ]]; then
         log_info "Resuming training from: $resume_dir"
         
-        local script_args="--experiment-dir \"$resume_dir\""
+        local script_args="--resume-from $resume_dir/checkpoints/checkpoint.pt"
+        local training_script="scripts/train_sam2_wrapper.py"
         if [[ "$use_memory_optimized" == true ]]; then
-            script_args="$script_args --memory-optimized"
+            training_script="scripts/train_sam2_memory_optimized.py"
         fi
         
-        python scripts/resume_training.py $script_args &
+        local wandb_args=""
+        if [[ "$use_wandb" == true ]]; then
+            wandb_args="--use-wandb --wandb-project $wandb_project"
+            if [[ -n "$wandb_entity" ]]; then
+                wandb_args="$wandb_args --wandb-entity $wandb_entity"
+            fi
+        fi
+        
+        local training_args=""
+        if [[ -n "$epochs" ]]; then
+            training_args="$training_args --epochs $epochs"
+        fi
+        if [[ -n "$learning_rate" ]]; then
+            training_args="$training_args --lr $learning_rate"
+        fi
+        if [[ -n "$save_freq" ]]; then
+            training_args="$training_args --save-freq $save_freq"
+        fi
+        
+        /usr/bin/python3 "$training_script" -c "$config_name" --use-cluster 0 --num-gpus 1 $wandb_args $script_args $training_args &
         TRAINING_PID=$!
     else
         # 新規学習開始
@@ -227,7 +283,26 @@ main() {
             log_info "Using memory-optimized training script"
         fi
         
-        /usr/bin/python3 "$training_script" -c "$config_name" --use-cluster 0 --num-gpus 1 &
+        local wandb_args=""
+        if [[ "$use_wandb" == true ]]; then
+            wandb_args="--use-wandb --wandb-project $wandb_project"
+            if [[ -n "$wandb_entity" ]]; then
+                wandb_args="$wandb_args --wandb-entity $wandb_entity"
+            fi
+        fi
+        
+        local training_args=""
+        if [[ -n "$epochs" ]]; then
+            training_args="$training_args --epochs $epochs"
+        fi
+        if [[ -n "$learning_rate" ]]; then
+            training_args="$training_args --lr $learning_rate"
+        fi
+        if [[ -n "$save_freq" ]]; then
+            training_args="$training_args --save-freq $save_freq"
+        fi
+        
+        /usr/bin/python3 "$training_script" -c "$config_name" --use-cluster 0 --num-gpus 1 $wandb_args $training_args &
         TRAINING_PID=$!
     fi
     
